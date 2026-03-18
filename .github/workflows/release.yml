@@ -1,0 +1,52 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build release archives
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          version="${GITHUB_REF_NAME}"
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+          )
+
+          for target in "${targets[@]}"; do
+            read -r goos goarch <<<"${target}"
+            workdir="$(mktemp -d)"
+            archive="capsule_${version}_${goos}_${goarch}.tar.gz"
+
+            GOOS="${goos}" GOARCH="${goarch}" CGO_ENABLED=0 \
+              go build -trimpath -ldflags="-s -w" -o "${workdir}/capsule" ./cmd/cli
+
+            tar -C "${workdir}" -czf "dist/${archive}" capsule
+          done
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
