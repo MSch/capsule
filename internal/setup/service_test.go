@@ -97,12 +97,12 @@ func TestRunRemoteInstallsServerAndAddsRemote(t *testing.T) {
 	installSnippet := `chmod +x '/tmp/capsule-incus.abcd' && if [ "$(id -u)" -eq 0 ]; then '/tmp/capsule-incus.abcd' --mode='server'; else sudo '/tmp/capsule-incus.abcd' --mode='server'; fi; status=$?; rm -f '/tmp/capsule-incus.abcd'; exit $status`
 	trustSnippet := `if [ "$(id -u)" -eq 0 ]; then incus config trust add 'test-client'; else sudo incus config trust add 'test-client'; fi`
 
-	runner.queue(`incus remote list --format=csv`, fakeRunResult{})
+	runner.queue(`incus remote list --format=json`, fakeRunResult{stdout: "{}"})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(precheck), fakeRunResult{stdout: "ok"})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 mktemp /tmp/capsule-incus.XXXXXX", fakeRunResult{stdout: "/tmp/capsule-incus.abcd\n"})
 	runner.queue("scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new /tmp/capsule-script.sh root@198.51.100.10:/tmp/capsule-incus.abcd", fakeRunResult{})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(installSnippet), fakeRunResult{})
-	runner.queue(`incus remote list --format=csv`, fakeRunResult{})
+	runner.queue(`incus remote list --format=json`, fakeRunResult{stdout: "{}"})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(trustSnippet), fakeRunResult{stdout: "token-value\n"})
 	runner.queue(`incus remote add capsule https://198.51.100.10:8443 --accept-certificate --token token-value`, fakeRunResult{})
 	runner.queue(`incus list capsule:`, fakeRunResult{stdout: ""})
@@ -156,13 +156,13 @@ func TestRunRemotePromptsForRemoteNameWhenCapsuleExists(t *testing.T) {
 	installSnippet := `chmod +x '/tmp/capsule-incus.abcd' && if [ "$(id -u)" -eq 0 ]; then '/tmp/capsule-incus.abcd' --mode='server'; else sudo '/tmp/capsule-incus.abcd' --mode='server'; fi; status=$?; rm -f '/tmp/capsule-incus.abcd'; exit $status`
 	trustSnippet := `if [ "$(id -u)" -eq 0 ]; then incus config trust add 'test-client'; else sudo incus config trust add 'test-client'; fi`
 
-	runner.queue(`incus remote list --format=csv`, fakeRunResult{stdout: "capsule,https://198.51.100.10:8443\n"})
-	runner.queue(`incus remote list --format=csv`, fakeRunResult{stdout: "capsule,https://198.51.100.10:8443\n"})
+	runner.queue(`incus remote list --format=json`, fakeRunResult{stdout: `{"capsule":{"Addr":"https://198.51.100.10:8443"}}`})
+	runner.queue(`incus remote list --format=json`, fakeRunResult{stdout: `{"capsule":{"Addr":"https://198.51.100.10:8443"}}`})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(precheck), fakeRunResult{stdout: "ok"})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 mktemp /tmp/capsule-incus.XXXXXX", fakeRunResult{stdout: "/tmp/capsule-incus.abcd\n"})
 	runner.queue("scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new /tmp/capsule-script.sh root@198.51.100.10:/tmp/capsule-incus.abcd", fakeRunResult{})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(installSnippet), fakeRunResult{})
-	runner.queue(`incus remote list --format=csv`, fakeRunResult{stdout: "capsule,https://198.51.100.10:8443\n"})
+	runner.queue(`incus remote list --format=json`, fakeRunResult{stdout: `{"capsule":{"Addr":"https://198.51.100.10:8443"}}`})
 	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(trustSnippet), fakeRunResult{stdout: "token-value\n"})
 	runner.queue(`incus remote add lab https://198.51.100.10:8443 --accept-certificate --token token-value`, fakeRunResult{})
 	runner.queue(`incus list lab:`, fakeRunResult{stdout: ""})

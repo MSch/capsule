@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -421,21 +422,19 @@ func (s *Service) issueRemoteTrustToken(ctx context.Context, target, clientName 
 func (s *Service) hasIncusRemote(ctx context.Context, remoteName string) (bool, error) {
 	result, err := s.runner.Run(ctx, CommandSpec{
 		Name: "incus",
-		Args: []string{"remote", "list", "--format=csv"},
+		Args: []string{"remote", "list", "--format=json"},
 	})
 	if err != nil {
 		return false, fmt.Errorf("listing Incus remotes: %w", err)
 	}
 
-	prefix := remoteName + ","
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == remoteName || strings.HasPrefix(line, prefix) {
-			return true, nil
-		}
+	var remotes map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(result.Stdout), &remotes); err != nil {
+		return false, fmt.Errorf("parsing Incus remotes: %w", err)
 	}
 
-	return false, nil
+	_, exists := remotes[remoteName]
+	return exists, nil
 }
 
 func (s *Service) chooseRemoteName(ctx context.Context, address string) (string, error) {
