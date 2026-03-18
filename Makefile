@@ -13,7 +13,7 @@ bootstrap: tools install-hooks
 
 build:
 	mkdir -p dist
-	go build -o dist/capsule ./cmd/cli
+	go build -o dist/capsule ./cmd/capsule
 
 check: fmt-check lint test
 
