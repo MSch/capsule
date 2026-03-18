@@ -2,7 +2,11 @@ module github.com/MSch/capsule
 
 go 1.25.0
 
-require github.com/lxc/incus/v6 v6.22.0
+require (
+	github.com/chzyer/readline v1.5.1
+	github.com/lxc/incus/v6 v6.22.0
+	golang.org/x/term v0.40.0
+)
 
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
@@ -47,7 +51,6 @@ require (
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

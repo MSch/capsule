@@ -4,8 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
+
+const inputPrefix = "→ "
 
 type Prompter interface {
 	Select(question string, options []string) (int, error)
@@ -13,27 +18,53 @@ type Prompter interface {
 	Ask(question, defaultValue string) (string, error)
 }
 
-type ConsolePrompter struct {
+type basePrompter struct {
 	reader      *bufio.Reader
 	out         io.Writer
 	promptCount int
 }
 
+type ConsolePrompter struct {
+	basePrompter
+}
+
 func NewConsolePrompter(in io.Reader, out io.Writer) Prompter {
+	if prompt, ok := newTerminalPrompter(in, out); ok {
+		return prompt
+	}
+
 	return &ConsolePrompter{
+		basePrompter: newBasePrompter(in, out),
+	}
+}
+
+func newBasePrompter(in io.Reader, out io.Writer) basePrompter {
+	return basePrompter{
 		reader: bufio.NewReader(in),
 		out:    out,
 	}
 }
 
 func (p *ConsolePrompter) Select(question string, options []string) (int, error) {
+	return runLineSelect(&p.basePrompter, question, options)
+}
+
+func (p *ConsolePrompter) Confirm(question string, defaultYes bool) (bool, error) {
+	return runConfirm(&p.basePrompter, question, defaultYes)
+}
+
+func (p *ConsolePrompter) Ask(question, defaultValue string) (string, error) {
+	return runAsk(&p.basePrompter, question, defaultValue)
+}
+
+func runLineSelect(p *basePrompter, question string, options []string) (int, error) {
 	p.printPromptHeader(question)
 	for index, option := range options {
 		fmt.Fprintf(p.out, "  %d. %s\n", index+1, option)
 	}
 
 	for {
-		fmt.Fprintf(p.out, "Choose an option [1-%d]\n> ", len(options))
+		fmt.Fprintf(p.out, "Choose an option [1-%d]\n%s", len(options), inputPrefix)
 		answer, err := p.readLine()
 		if err != nil {
 			return 0, err
@@ -52,7 +83,7 @@ func (p *ConsolePrompter) Select(question string, options []string) (int, error)
 	}
 }
 
-func (p *ConsolePrompter) Confirm(question string, defaultYes bool) (bool, error) {
+func runConfirm(p *basePrompter, question string, defaultYes bool) (bool, error) {
 	suffix := "[y/N]"
 	if defaultYes {
 		suffix = "[Y/n]"
@@ -60,7 +91,7 @@ func (p *ConsolePrompter) Confirm(question string, defaultYes bool) (bool, error
 
 	for {
 		p.printPromptHeader(fmt.Sprintf("%s %s", question, suffix))
-		fmt.Fprint(p.out, "> ")
+		fmt.Fprint(p.out, inputPrefix)
 		answer, err := p.readLine()
 		if err != nil {
 			return false, err
@@ -81,14 +112,14 @@ func (p *ConsolePrompter) Confirm(question string, defaultYes bool) (bool, error
 	}
 }
 
-func (p *ConsolePrompter) Ask(question, defaultValue string) (string, error) {
+func runAsk(p *basePrompter, question, defaultValue string) (string, error) {
 	prompt := question
 	if defaultValue != "" {
 		prompt = fmt.Sprintf("%s [%s]", question, defaultValue)
 	}
 
 	p.printPromptHeader(prompt)
-	fmt.Fprint(p.out, "> ")
+	fmt.Fprint(p.out, inputPrefix)
 	answer, err := p.readLine()
 	if err != nil {
 		return "", err
@@ -101,7 +132,7 @@ func (p *ConsolePrompter) Ask(question, defaultValue string) (string, error) {
 	return answer, nil
 }
 
-func (p *ConsolePrompter) readLine() (string, error) {
+func (p *basePrompter) readLine() (string, error) {
 	line, err := p.reader.ReadString('\n')
 	if err != nil && len(line) == 0 {
 		return "", err
@@ -110,11 +141,29 @@ func (p *ConsolePrompter) readLine() (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
-func (p *ConsolePrompter) printPromptHeader(prompt string) {
+func (p *basePrompter) printPromptHeader(prompt string) {
 	if p.promptCount > 0 {
 		fmt.Fprintln(p.out)
 	}
 
 	fmt.Fprintln(p.out, prompt)
 	p.promptCount++
+}
+
+func newTerminalPrompter(in io.Reader, out io.Writer) (*TerminalPrompter, bool) {
+	inFile, ok := in.(*os.File)
+	if !ok || !term.IsTerminal(int(inFile.Fd())) {
+		return nil, false
+	}
+
+	outFile, ok := out.(*os.File)
+	if !ok || !term.IsTerminal(int(outFile.Fd())) {
+		return nil, false
+	}
+
+	return &TerminalPrompter{
+		basePrompter: newBasePrompter(inFile, outFile),
+		in:           inFile,
+		outFile:      outFile,
+	}, true
 }
