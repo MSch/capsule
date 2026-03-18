@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -82,11 +83,7 @@ func (s *Service) runRemote(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.ensureLocalIncusClient(ctx, host); err != nil {
-		return err
-	}
-
-	target, err := s.prompt.Ask("SSH target for the remote server", "")
+	target, err := s.prompt.Ask("SSH target for the remote server (for example: root@203.0.113.10)", "")
 	if err != nil {
 		return err
 	}
@@ -95,15 +92,6 @@ func (s *Service) runRemote(ctx context.Context) error {
 	}
 
 	defaultAddress := extractHostFromSSHTarget(target)
-	remoteName, err := s.prompt.Ask("Local name for the Incus remote", defaultRemoteName(defaultAddress))
-	if err != nil {
-		return err
-	}
-	remoteName = sanitizeRemoteName(remoteName)
-	if remoteName == "" {
-		return fmt.Errorf("the remote name must contain at least one letter or number")
-	}
-
 	remoteAddress, err := s.prompt.Ask("Address the Incus API should use", defaultAddress)
 	if err != nil {
 		return err
@@ -112,11 +100,19 @@ func (s *Service) runRemote(ctx context.Context) error {
 		return fmt.Errorf("the remote address is required")
 	}
 
+	remoteName, err := s.chooseRemoteName(ctx, defaultAddress)
+	if err != nil {
+		return err
+	}
+
+	if err := s.ensureLocalIncusClient(ctx, host); err != nil {
+		return err
+	}
+
 	if err := s.ensureRemoteAutomationAccess(ctx, target); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(s.out, "Provisioning Incus on %s...\n", target)
 	if err := s.installRemoteServer(ctx, target); err != nil {
 		return err
 	}
@@ -124,13 +120,12 @@ func (s *Service) runRemote(ctx context.Context) error {
 	if exists, err := s.hasIncusRemote(ctx, remoteName); err != nil {
 		return err
 	} else if !exists {
-		fmt.Fprintf(s.out, "Connecting the local Incus client to %s...\n", remoteName)
 		token, err := s.issueRemoteTrustToken(ctx, target, host.Hostname)
 		if err != nil {
 			return err
 		}
 
-		if _, err := s.runner.Run(ctx, CommandSpec{
+		if _, err := s.runCommandStep(ctx, fmt.Sprintf("Adding local Incus remote %s", remoteName), CommandSpec{
 			Name: "incus",
 			Args: []string{
 				"remote",
@@ -145,14 +140,21 @@ func (s *Service) runRemote(ctx context.Context) error {
 			return fmt.Errorf("adding Incus remote %q: %w", remoteName, err)
 		}
 	} else {
-		fmt.Fprintf(s.out, "Incus remote %s already exists locally, skipping add.\n", remoteName)
+		fmt.Fprintf(s.out, "Incus remote %s already exists locally, reusing it.\n", remoteName)
 	}
 
-	if _, err := s.runner.Run(ctx, CommandSpec{
+	if _, err := s.runCommandStep(ctx, fmt.Sprintf("Verifying remote Incus access for %s", remoteName), CommandSpec{
 		Name: "incus",
 		Args: []string{"list", fmt.Sprintf("%s:", remoteName)},
 	}); err != nil {
 		return fmt.Errorf("verifying remote Incus access for %q: %w", remoteName, err)
+	}
+
+	if _, err := s.runCommandStep(ctx, fmt.Sprintf("Selecting %s as the default Incus remote", remoteName), CommandSpec{
+		Name: "incus",
+		Args: []string{"remote", "switch", remoteName},
+	}); err != nil {
+		return fmt.Errorf("switching the default Incus remote to %q: %w", remoteName, err)
 	}
 
 	fmt.Fprintf(s.out, "Remote Incus setup finished. Use %s: as the remote prefix.\n", remoteName)
@@ -210,16 +212,15 @@ func (s *Service) setupLocalDarwin(ctx context.Context) error {
 		return nil
 	case version.HasServer:
 		fmt.Fprintln(s.out, "Incus client and server versions do not match, updating Colima...")
-		if _, err := s.runner.Run(ctx, CommandSpec{
-			Name:        "colima",
-			Args:        []string{"update"},
-			Interactive: true,
+		if _, err := s.runCommandStep(ctx, "Updating Colima", CommandSpec{
+			Name: "colima",
+			Args: []string{"update"},
 		}); err != nil {
 			return fmt.Errorf("updating Colima: %w", err)
 		}
 	default:
 		fmt.Fprintln(s.out, "No local Incus server detected, starting Colima with the Incus runtime...")
-		if _, err := s.runner.Run(ctx, CommandSpec{
+		if _, err := s.runCommandStep(ctx, "Starting Colima with the Incus runtime", CommandSpec{
 			Name: "colima",
 			Args: []string{
 				"start",
@@ -229,7 +230,6 @@ func (s *Service) setupLocalDarwin(ctx context.Context) error {
 				"--nested-virtualization",
 				"--vm-type", "vz",
 			},
-			Interactive: true,
 		}); err != nil {
 			return fmt.Errorf("starting Colima: %w", err)
 		}
@@ -279,10 +279,9 @@ func (s *Service) ensureHomebrewFormulas(ctx context.Context, formulas []string)
 		return fmt.Errorf("missing required packages: %s", strings.Join(missing, ", "))
 	}
 
-	if _, err := s.runner.Run(ctx, CommandSpec{
-		Name:        "brew",
-		Args:        append([]string{"install"}, missing...),
-		Interactive: true,
+	if _, err := s.runCommandStep(ctx, fmt.Sprintf("Installing %s with Homebrew", strings.Join(missing, ", ")), CommandSpec{
+		Name: "brew",
+		Args: append([]string{"install"}, missing...),
 	}); err != nil {
 		return fmt.Errorf("installing Homebrew packages %s: %w", strings.Join(missing, ", "), err)
 	}
@@ -332,7 +331,7 @@ func (s *Service) runLinuxInstaller(ctx context.Context, mode string) error {
 }
 
 func (s *Service) ensureRemoteAutomationAccess(ctx context.Context, target string) error {
-	_, err := s.runner.Run(ctx, CommandSpec{
+	_, err := s.runCommandStep(ctx, fmt.Sprintf("Checking remote automation access on %s", target), CommandSpec{
 		Name: "ssh",
 		Args: append(s.sshOptions(),
 			target,
@@ -353,7 +352,7 @@ func (s *Service) installRemoteServer(ctx context.Context, target string) error 
 	}
 	defer cleanup()
 
-	result, err := s.runner.Run(ctx, CommandSpec{
+	result, err := s.runCommandStep(ctx, fmt.Sprintf("Creating a remote installer path on %s", target), CommandSpec{
 		Name: "ssh",
 		Args: append(s.sshOptions(), target, "mktemp", "/tmp/capsule-incus.XXXXXX"),
 	})
@@ -366,10 +365,9 @@ func (s *Service) installRemoteServer(ctx context.Context, target string) error 
 		return fmt.Errorf("could not determine remote installer path on %s", target)
 	}
 
-	if _, err := s.runner.Run(ctx, CommandSpec{
-		Name:        "scp",
-		Args:        append(s.scpOptions(), scriptPath, fmt.Sprintf("%s:%s", target, remotePath)),
-		Interactive: true,
+	if _, err := s.runCommandStep(ctx, fmt.Sprintf("Uploading the installer to %s", target), CommandSpec{
+		Name: "scp",
+		Args: append(s.scpOptions(), scriptPath, fmt.Sprintf("%s:%s", target, remotePath)),
 	}); err != nil {
 		return fmt.Errorf("uploading installer to %s: %w", target, err)
 	}
@@ -384,10 +382,9 @@ func (s *Service) installRemoteServer(ctx context.Context, target string) error 
 		shellQuote(remotePath),
 	)
 
-	if _, err := s.runner.Run(ctx, CommandSpec{
-		Name:        "ssh",
-		Args:        append(s.sshOptions(), target, remoteShell(executeSnippet)),
-		Interactive: true,
+	if _, err := s.runCommandStep(ctx, fmt.Sprintf("Provisioning Incus on %s", target), CommandSpec{
+		Name: "ssh",
+		Args: append(s.sshOptions(), target, remoteShell(executeSnippet)),
 	}); err != nil {
 		return fmt.Errorf("running remote installer on %s: %w", target, err)
 	}
@@ -402,7 +399,7 @@ func (s *Service) issueRemoteTrustToken(ctx context.Context, target, clientName 
 		shellQuote(clientName),
 	)
 
-	result, err := s.runner.Run(ctx, CommandSpec{
+	result, err := s.runCommandStep(ctx, fmt.Sprintf("Creating a trust token on %s", target), CommandSpec{
 		Name: "ssh",
 		Args: append(s.sshOptions(), target, remoteShell(trustSnippet)),
 	})
@@ -439,6 +436,58 @@ func (s *Service) hasIncusRemote(ctx context.Context, remoteName string) (bool, 
 	}
 
 	return false, nil
+}
+
+func (s *Service) chooseRemoteName(ctx context.Context, address string) (string, error) {
+	const defaultName = "capsule"
+
+	if _, err := s.runner.LookPath("incus"); err != nil {
+		return defaultName, nil
+	}
+
+	exists, err := s.hasIncusRemote(ctx, defaultName)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return defaultName, nil
+	}
+
+	suggestion := fallbackRemoteName(address)
+	for {
+		remoteName, err := s.prompt.Ask("Local name for the Incus remote (capsule is already in use)", suggestion)
+		if err != nil {
+			return "", err
+		}
+
+		remoteName = sanitizeRemoteName(remoteName)
+		if remoteName == "" {
+			fmt.Fprintln(s.out, "The remote name must contain at least one letter or number.")
+			continue
+		}
+
+		exists, err := s.hasIncusRemote(ctx, remoteName)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return remoteName, nil
+		}
+
+		fmt.Fprintf(s.out, "Incus remote %s already exists locally. Choose another name.\n", remoteName)
+		suggestion = remoteName
+	}
+}
+
+func (s *Service) runCommandStep(ctx context.Context, message string, spec CommandSpec) (Result, error) {
+	var result Result
+	err := newTaskUI(s.out).Run(message, func() (string, error) {
+		var runErr error
+		result, runErr = s.runner.Run(ctx, spec)
+		return joinOutput(result.Stdout, result.Stderr), runErr
+	})
+
+	return result, err
 }
 
 func joinOutput(parts ...string) string {
@@ -496,12 +545,23 @@ func defaultRemoteName(host string) string {
 		return "remote"
 	}
 
-	host = strings.TrimSuffix(host, filepath.Ext(host))
+	if net.ParseIP(host) == nil {
+		host = strings.TrimSuffix(host, filepath.Ext(host))
+	}
 	if host == "" {
 		return "remote"
 	}
 
 	return sanitizeRemoteName(host)
+}
+
+func fallbackRemoteName(host string) string {
+	name := defaultRemoteName(host)
+	if name == "" || name == "remote" {
+		return "capsule-remote"
+	}
+
+	return "capsule-" + name
 }
 
 func sanitizeRemoteName(value string) string {

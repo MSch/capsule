@@ -2,6 +2,131 @@
 set -euo pipefail
 
 MODE="server"
+LOG_DIR=""
+SPINNER_PID=""
+SPINNER_MSG=""
+
+CYAN=$'\033[36m'
+GREEN=$'\033[32m'
+RED=$'\033[31m'
+RESET=$'\033[0m'
+
+cleanup() {
+  stop_spinner
+  if [[ -n "$LOG_DIR" && -d "$LOG_DIR" ]]; then
+    rm -rf "$LOG_DIR"
+  fi
+}
+
+trap cleanup EXIT INT HUP TERM
+
+start_spinner() {
+  SPINNER_MSG="$1"
+  if [[ ! -t 1 ]]; then
+    return
+  fi
+
+  (
+    local frames=('|' '/' '-' '\')
+    local index=0
+    while true; do
+      printf '\r%s%s%s %s ' "$CYAN" "${frames[index]}" "$RESET" "$SPINNER_MSG"
+      sleep 0.1
+      index=$(( (index + 1) % ${#frames[@]} ))
+    done
+  ) &
+  SPINNER_PID=$!
+}
+
+stop_spinner() {
+  if [[ -n "$SPINNER_PID" ]]; then
+    kill "$SPINNER_PID" 2>/dev/null || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+    if [[ -t 1 ]]; then
+      printf '\r\033[K'
+    fi
+  fi
+}
+
+step_done() {
+  stop_spinner
+  printf '%s[ok]%s %s\n' "$GREEN" "$RESET" "$1"
+}
+
+step_fail() {
+  stop_spinner
+  printf '%s[x]%s %s\n' "$RED" "$RESET" "$1" >&2
+}
+
+run_step() {
+  local message="$1"
+  shift
+
+  local log_file="$LOG_DIR/$(date +%s%N).log"
+  if [[ ! -t 1 ]]; then
+    printf '%s...\n' "$message"
+  fi
+  start_spinner "$message"
+
+  if "$@" >"$log_file" 2>&1; then
+    step_done "$message"
+    return 0
+  fi
+
+  local status=$?
+  step_fail "$message"
+  if [[ -s "$log_file" ]]; then
+    printf 'Command output:\n' >&2
+    cat "$log_file" >&2
+  fi
+  exit "$status"
+}
+
+install_repository_key() {
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+}
+
+write_repository_source() {
+  cat >/etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
+Enabled: yes
+Types: deb
+URIs: https://pkgs.zabbly.com/incus/stable
+Suites: ${CODENAME}
+Components: main
+Architectures: ${ARCH}
+Signed-By: /etc/apt/keyrings/zabbly.asc
+EOF
+}
+
+enable_incus_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now incus.service >/dev/null 2>&1 || systemctl restart incus.service
+  fi
+}
+
+wait_for_incus() {
+  incus admin waitready >/dev/null 2>&1 || true
+}
+
+initialize_storage_if_needed() {
+  if ! incus storage list --format csv -c n >/dev/null 2>&1 || [[ -z "$(incus storage list --format csv -c n 2>/dev/null)" ]]; then
+    incus admin init --auto --storage-backend dir
+  fi
+}
+
+configure_firewall() {
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+    ufw allow 8443/tcp >/dev/null 2>&1 || true
+  fi
+}
+
+add_target_user_to_incus_admin() {
+  if [[ -n "$TARGET_USER" && "$TARGET_USER" != "root" ]] && getent group incus-admin >/dev/null 2>&1; then
+    usermod -aG incus-admin "$TARGET_USER" || true
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -42,53 +167,32 @@ if [[ -z "$CODENAME" ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+LOG_DIR="$(mktemp -d)"
 
-apt-get update
-apt-get install -y ca-certificates curl gpg
+printf 'Capsule Incus installer\n'
 
-install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+run_step "Refreshing apt package indexes" apt-get update
+run_step "Installing base packages" apt-get install -y ca-certificates curl gpg
+run_step "Installing the Incus signing key" install_repository_key
+run_step "Writing the Incus apt source" write_repository_source
 
-cat >/etc/apt/sources.list.d/zabbly-incus-stable.sources <<EOF
-Enabled: yes
-Types: deb
-URIs: https://pkgs.zabbly.com/incus/stable
-Suites: ${CODENAME}
-Components: main
-Architectures: ${ARCH}
-Signed-By: /etc/apt/keyrings/zabbly.asc
-EOF
-
-apt-get update
+run_step "Refreshing apt package indexes for Incus" apt-get update
 
 PACKAGE="incus"
 if [[ "$MODE" == "client" ]]; then
   PACKAGE="incus-client"
 fi
 
-apt-get install -y "${PACKAGE}"
+run_step "Installing ${PACKAGE}" apt-get install -y "${PACKAGE}"
 
 if [[ "$MODE" != "server" ]]; then
   exit 0
 fi
 
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl enable --now incus.service >/dev/null 2>&1 || systemctl restart incus.service
-fi
-
-incus admin waitready >/dev/null 2>&1 || true
-
-if ! incus storage list --format csv -c n >/dev/null 2>&1 || [[ -z "$(incus storage list --format csv -c n 2>/dev/null)" ]]; then
-  incus admin init --auto --storage-backend dir
-fi
-
-incus config set core.https_address :8443
-
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-  ufw allow 8443/tcp >/dev/null 2>&1 || true
-fi
-
 TARGET_USER="${SUDO_USER:-${USER:-root}}"
-if [[ -n "$TARGET_USER" && "$TARGET_USER" != "root" ]] && getent group incus-admin >/dev/null 2>&1; then
-  usermod -aG incus-admin "$TARGET_USER" || true
-fi
+run_step "Starting the Incus service" enable_incus_service
+run_step "Waiting for the Incus daemon" wait_for_incus
+run_step "Initializing Incus storage" initialize_storage_if_needed
+run_step "Configuring the Incus API listener" incus config set core.https_address :8443
+run_step "Opening the Incus API port in ufw" configure_firewall
+run_step "Adding ${TARGET_USER} to the incus-admin group" add_target_user_to_incus_admin
