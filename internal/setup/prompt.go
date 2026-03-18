@@ -14,8 +14,9 @@ type Prompter interface {
 }
 
 type ConsolePrompter struct {
-	reader *bufio.Reader
-	out    io.Writer
+	reader      *bufio.Reader
+	out         io.Writer
+	promptCount int
 }
 
 func NewConsolePrompter(in io.Reader, out io.Writer) Prompter {
@@ -26,13 +27,13 @@ func NewConsolePrompter(in io.Reader, out io.Writer) Prompter {
 }
 
 func (p *ConsolePrompter) Select(question string, options []string) (int, error) {
-	fmt.Fprintln(p.out, question)
+	p.printPromptHeader(question)
 	for index, option := range options {
 		fmt.Fprintf(p.out, "  %d. %s\n", index+1, option)
 	}
 
 	for {
-		fmt.Fprintf(p.out, "Choose an option [1-%d]: ", len(options))
+		fmt.Fprintf(p.out, "Choose an option [1-%d]\n> ", len(options))
 		answer, err := p.readLine()
 		if err != nil {
 			return 0, err
@@ -58,7 +59,8 @@ func (p *ConsolePrompter) Confirm(question string, defaultYes bool) (bool, error
 	}
 
 	for {
-		fmt.Fprintf(p.out, "%s %s: ", question, suffix)
+		p.printPromptHeader(fmt.Sprintf("%s %s", question, suffix))
+		fmt.Fprint(p.out, "> ")
 		answer, err := p.readLine()
 		if err != nil {
 			return false, err
@@ -85,7 +87,8 @@ func (p *ConsolePrompter) Ask(question, defaultValue string) (string, error) {
 		prompt = fmt.Sprintf("%s [%s]", question, defaultValue)
 	}
 
-	fmt.Fprintf(p.out, "%s: ", prompt)
+	p.printPromptHeader(prompt)
+	fmt.Fprint(p.out, "> ")
 	answer, err := p.readLine()
 	if err != nil {
 		return "", err
@@ -105,4 +108,13 @@ func (p *ConsolePrompter) readLine() (string, error) {
 	}
 
 	return strings.TrimSpace(line), nil
+}
+
+func (p *ConsolePrompter) printPromptHeader(prompt string) {
+	if p.promptCount > 0 {
+		fmt.Fprintln(p.out)
+	}
+
+	fmt.Fprintln(p.out, prompt)
+	p.promptCount++
 }
