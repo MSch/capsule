@@ -512,7 +512,10 @@ func (s *Service) chooseRemoteName(ctx context.Context, address string) (string,
 		return defaultName, nil
 	}
 
-	suggestion := fallbackRemoteName(address)
+	suggestion, err := s.nextAvailableRemoteName(ctx, fallbackRemoteName(address))
+	if err != nil {
+		return "", err
+	}
 	for {
 		remoteName, err := s.prompt.Ask("Local name for the Incus remote (capsule is already in use)", suggestion)
 		if err != nil {
@@ -534,7 +537,30 @@ func (s *Service) chooseRemoteName(ctx context.Context, address string) (string,
 		}
 
 		fmt.Fprintf(s.out, "Incus remote %s already exists locally. Choose another name.\n", remoteName)
-		suggestion = remoteName
+		suggestion, err = s.nextAvailableRemoteName(ctx, remoteName)
+		if err != nil {
+			return "", err
+		}
+	}
+}
+
+func (s *Service) nextAvailableRemoteName(ctx context.Context, base string) (string, error) {
+	base = sanitizeRemoteName(base)
+	if base == "" {
+		base = "capsule-remote"
+	}
+
+	candidate := base
+	for suffix := 2; ; suffix++ {
+		exists, err := s.incusManager().HasRemote(ctx, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+
+		candidate = fmt.Sprintf("%s-%d", base, suffix)
 	}
 }
 

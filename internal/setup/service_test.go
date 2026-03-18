@@ -223,6 +223,67 @@ func TestRunRemotePromptsForRemoteNameWhenCapsuleExists(t *testing.T) {
 	}
 }
 
+func TestRunRemoteSuggestsNextAvailableRemoteNameWhenFallbackExists(t *testing.T) {
+	t.Parallel()
+
+	prompt := &fakePrompter{
+		selectChoices: []int{1},
+		askAnswers: []string{
+			"root@198.51.100.10",
+			"198.51.100.10",
+			"",
+		},
+	}
+
+	runner := newFakeRunner(map[string]bool{
+		"incus": true,
+		"scp":   true,
+		"ssh":   true,
+	})
+	incus := &fakeIncusManager{
+		remoteExists: map[string][]bool{
+			"capsule":                 {true},
+			"capsule-198-51-100-10":   {true},
+			"capsule-198-51-100-10-2": {false, false},
+		},
+		trustToken: "token-value",
+	}
+	tunnelOpener := &fakeSocketTunnelOpener{tunnel: &fakeSocketTunnel{path: "/tmp/capsule-incus.sock"}}
+
+	precheck := `if [ "$(id -u)" -eq 0 ] || sudo -n true >/dev/null 2>&1; then printf ok; else exit 1; fi`
+	installSnippet := `chmod +x '/tmp/capsule-incus.abcd' && if [ "$(id -u)" -eq 0 ]; then '/tmp/capsule-incus.abcd' --mode='server'; else sudo '/tmp/capsule-incus.abcd' --mode='server'; fi; status=$?; rm -f '/tmp/capsule-incus.abcd'; exit $status`
+	socketSnippet := `for path in /run/incus/unix.socket /var/lib/incus/unix.socket; do if [ -S "$path" ]; then printf '%s\n' "$path"; exit 0; fi; done; exit 1`
+	bridgeSnippet := `index=0; while [ -e "/sys/class/net/incusbr${index}" ]; do index=$((index + 1)); done; printf 'incusbr%s\n' "$index"`
+
+	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(precheck), fakeRunResult{stdout: "ok"})
+	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 mktemp /tmp/capsule-incus.XXXXXX", fakeRunResult{stdout: "/tmp/capsule-incus.abcd\n"})
+	runner.queue("scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new /tmp/capsule-script.sh root@198.51.100.10:/tmp/capsule-incus.abcd", fakeRunResult{})
+	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(installSnippet), fakeRunResult{})
+	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(socketSnippet), fakeRunResult{stdout: "/run/incus/unix.socket\n"})
+	runner.queue("ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new root@198.51.100.10 "+remoteShell(bridgeSnippet), fakeRunResult{stdout: "incusbr0\n"})
+
+	service := &Service{
+		prompt:       prompt,
+		runner:       runner,
+		hostDetector: fakeHostDetector{host: Host{GOOS: "darwin", Hostname: "test-client"}},
+		out:          io.Discard,
+		scriptWriter: func() (string, func(), error) { return "/tmp/capsule-script.sh", func() {}, nil },
+		incus:        incus,
+		tunnels:      tunnelOpener,
+	}
+
+	if err := service.Run(context.Background()); err != nil {
+		t.Fatalf("Run returned an error: %v", err)
+	}
+
+	if len(incus.addRemoteCalls) != 1 || incus.addRemoteCalls[0].remoteName != "capsule-198-51-100-10-2" {
+		t.Fatalf("expected next available remote name, got %+v", incus.addRemoteCalls)
+	}
+	if prompt.askDefaults[2] != "capsule-198-51-100-10-2" {
+		t.Fatalf("expected next available remote name suggestion, got %q", prompt.askDefaults[2])
+	}
+}
+
 type fakePrompter struct {
 	selectChoices []int
 	askAnswers    []string
