@@ -107,13 +107,24 @@ enable_incus_service() {
 }
 
 wait_for_incus() {
-  incus admin waitready >/dev/null 2>&1 || true
-}
+  local sockets=(
+    /run/incus/unix.socket
+    /var/lib/incus/unix.socket
+  )
 
-initialize_storage_if_needed() {
-  if ! incus storage list --format csv -c n >/dev/null 2>&1 || [[ -z "$(incus storage list --format csv -c n 2>/dev/null)" ]]; then
-    incus admin init --auto --storage-backend dir
-  fi
+  local attempt socket
+  for attempt in $(seq 1 60); do
+    for socket in "${sockets[@]}"; do
+      if [[ -S "$socket" ]]; then
+        return 0
+      fi
+    done
+
+    sleep 1
+  done
+
+  printf 'timed out waiting for the Incus unix socket\n' >&2
+  return 1
 }
 
 configure_firewall() {
@@ -191,8 +202,6 @@ fi
 
 TARGET_USER="${SUDO_USER:-${USER:-root}}"
 run_step "Starting the Incus service" enable_incus_service
-run_step "Waiting for the Incus daemon" wait_for_incus
-run_step "Initializing Incus storage" initialize_storage_if_needed
-run_step "Configuring the Incus API listener" incus config set core.https_address :8443
+run_step "Waiting for the Incus socket" wait_for_incus
 run_step "Opening the Incus API port in ufw" configure_firewall
 run_step "Adding ${TARGET_USER} to the incus-admin group" add_target_user_to_incus_admin
