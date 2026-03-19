@@ -1,4 +1,4 @@
-module github.com/MSch/capsule
+module github.com/sandboxsdk/capsule
 
 go 1.25.0
 

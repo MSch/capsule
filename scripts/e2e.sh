@@ -253,7 +253,7 @@ build_release() {
     cd "$ROOT_DIR"
     GOOS=linux GOARCH="$arch" CGO_ENABLED=0 \
       go build \
-      -ldflags "-X github.com/MSch/capsule/internal/version.Version=$version" \
+      -ldflags "-X github.com/sandboxsdk/capsule/internal/version.Version=$version" \
       -o "$BUILD_DIR/capsule" \
       ./cmd/capsule
   )

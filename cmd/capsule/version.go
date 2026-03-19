@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/MSch/capsule/internal/version"
+	"github.com/sandboxsdk/capsule/internal/version"
 	"github.com/spf13/cobra"
 )
 

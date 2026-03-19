@@ -2,8 +2,8 @@ import { Hono } from 'hono'
 
 const app = new Hono()
 
-const REPO_URL = 'https://github.com/MSch/capsule'
-const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/MSch/capsule/main/scripts/install.sh'
+const REPO_URL = 'https://github.com/sandboxsdk/capsule'
+const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/sandboxsdk/capsule/main/scripts/install.sh'
 const USER_AGENT = 'capsule-site/1.0'
 
 app.on(['GET', 'HEAD'], '/', (c) => c.redirect(REPO_URL, 302))

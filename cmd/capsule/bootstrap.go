@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/MSch/capsule/internal/setup"
+	"github.com/sandboxsdk/capsule/internal/setup"
 	"github.com/spf13/cobra"
 )
 

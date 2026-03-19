@@ -3,7 +3,7 @@ package main
 import (
 	"io"
 
-	"github.com/MSch/capsule/internal/setup"
+	"github.com/sandboxsdk/capsule/internal/setup"
 )
 
 type deps struct {

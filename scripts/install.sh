@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 BIN_DIR="${CAPSULE_INSTALL_BIN_DIR:-}"
-REPO="${CAPSULE_INSTALL_REPO:-MSch/capsule}"
+REPO="${CAPSULE_INSTALL_REPO:-sandboxsdk/capsule}"
 VERSION="${CAPSULE_INSTALL_VERSION:-}"
 BASE_URL="${CAPSULE_INSTALL_URL:-}"
 ASSET_PREFIX="${CAPSULE_INSTALL_ASSET_PREFIX:-capsule}"
@@ -82,7 +82,7 @@ Options:
   -h, --help   Show this help message.
 
 Environment variables:
-  CAPSULE_INSTALL_REPO          Override the GitHub repo (default: MSch/capsule)
+  CAPSULE_INSTALL_REPO          Override the GitHub repo (default: sandboxsdk/capsule)
   CAPSULE_INSTALL_VERSION       Override the release tag instead of resolving latest
   CAPSULE_INSTALL_URL           Override the base download URL
   CAPSULE_INSTALL_ASSET_PREFIX  Override the asset name prefix (default: capsule)
