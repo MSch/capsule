@@ -237,12 +237,16 @@ func (s *Service) setupLocalDarwin(ctx context.Context) error {
 		Name: "colima",
 		Args: []string{
 			"start",
+			"--activate", "false",
+			"--port-forwarder", "none",
+			"--mount", "none",
 			"--runtime", "incus",
 			"--cpu", "4",
 			"--memory", "8",
 			"--nested-virtualization",
 			"--vm-type", "vz",
 		},
+		Env: []string{"COLIMA_PROFILE=capsule"},
 	}); err != nil {
 		return fmt.Errorf("starting Colima: %w", err)
 	}

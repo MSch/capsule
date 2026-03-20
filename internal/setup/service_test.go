@@ -16,7 +16,7 @@ func TestSetupLocalDarwinStartsColimaWhenServerIsMissing(t *testing.T) {
 		"colima": true,
 		"incus":  true,
 	})
-	runner.queue("colima start --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz", fakeRunResult{})
+	runner.queue("colima start --activate false --port-forwarder none --mount none --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz", fakeRunResult{})
 
 	incus := &fakeIncusManager{
 		statuses: []IncusStatus{
@@ -38,8 +38,11 @@ func TestSetupLocalDarwinStartsColimaWhenServerIsMissing(t *testing.T) {
 		t.Fatalf("setupLocalDarwin returned an error: %v", err)
 	}
 
-	if !runner.called("colima start --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz") {
+	if !runner.called("colima start --activate false --port-forwarder none --mount none --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz") {
 		t.Fatal("expected Colima start to be invoked")
+	}
+	if !runner.calledWithEnv("colima start --activate false --port-forwarder none --mount none --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz", "COLIMA_PROFILE=capsule") {
+		t.Fatal("expected Colima start to set COLIMA_PROFILE=capsule")
 	}
 }
 
@@ -68,7 +71,7 @@ func TestSetupLocalDarwinSkipsColimaWhenServerIsReachable(t *testing.T) {
 		t.Fatalf("setupLocalDarwin returned an error: %v", err)
 	}
 
-	if runner.called("colima start --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz") {
+	if runner.called("colima start --activate false --port-forwarder none --mount none --runtime incus --cpu 4 --memory 8 --nested-virtualization --vm-type vz") {
 		t.Fatal("expected Colima start to be skipped")
 	}
 }
@@ -468,6 +471,7 @@ type fakeRunner struct {
 	lookPath map[string]bool
 	queued   map[string][]fakeRunResult
 	calls    []string
+	specs    []CommandSpec
 }
 
 func newFakeRunner(lookPath map[string]bool) *fakeRunner {
@@ -488,6 +492,7 @@ func (f *fakeRunner) LookPath(file string) (string, error) {
 func (f *fakeRunner) Run(_ context.Context, spec CommandSpec) (Result, error) {
 	key := strings.Join(append([]string{spec.Name}, spec.Args...), " ")
 	f.calls = append(f.calls, key)
+	f.specs = append(f.specs, spec)
 
 	queue := f.queued[key]
 	if len(queue) == 0 {
@@ -511,6 +516,23 @@ func (f *fakeRunner) called(command string) bool {
 	for _, call := range f.calls {
 		if call == command {
 			return true
+		}
+	}
+
+	return false
+}
+
+func (f *fakeRunner) calledWithEnv(command, env string) bool {
+	for _, spec := range f.specs {
+		key := strings.Join(append([]string{spec.Name}, spec.Args...), " ")
+		if key != command {
+			continue
+		}
+
+		for _, entry := range spec.Env {
+			if entry == env {
+				return true
+			}
 		}
 	}
 

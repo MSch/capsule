@@ -11,6 +11,7 @@ import (
 type CommandSpec struct {
 	Name        string
 	Args        []string
+	Env         []string
 	Stdin       string
 	Interactive bool
 }
@@ -43,6 +44,9 @@ func (r *execRunner) LookPath(file string) (string, error) {
 
 func (r *execRunner) Run(ctx context.Context, spec CommandSpec) (Result, error) {
 	cmd := exec.CommandContext(ctx, spec.Name, spec.Args...)
+	if len(spec.Env) > 0 {
+		cmd.Env = append(os.Environ(), spec.Env...)
+	}
 
 	if spec.Interactive {
 		cmd.Stdout = r.stdout
