@@ -2,7 +2,7 @@
 
 ## Live Testing
 
-- When setup or installer changes need end-to-end validation, use Hetzner Cloud and provision two fresh `cx23` servers: one client and one server.
+- When setup or installer changes need end-to-end validation, use Hetzner Cloud and provision two fresh `cx23` servers in an EU location: one client and one server.
 - Prefer testing the pushed and released build when the public installer path is part of the change.
 
 ## Remote Execution
