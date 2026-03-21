@@ -547,14 +547,21 @@ install_ci() {
 }
 
 verify() {
+  local default_privileged_verify="false"
+
   container_running "$CLIENT_NAME" || fail "$CLIENT_NAME is not running; run '$0 up' first"
   container_running "$SERVER_NAME" || fail "$SERVER_NAME is not running; run '$0 up' first"
+
+  if [[ "$(container_runtime_kind)" == "podman" ]]; then
+    default_privileged_verify="true"
+  fi
 
   log "launching a lightweight Alpine instance via the configured Capsule Incus remote"
   container_cmd exec "$CLIENT_NAME" bash -lc "capsule incus delete -f $VERIFY_CONTAINER_NAME >/dev/null 2>&1 || true"
   container_cmd exec "$CLIENT_NAME" bash -lc '
 set -euo pipefail
 name="'"$VERIFY_CONTAINER_NAME"'"
+default_privileged_verify="'"$default_privileged_verify"'"
 launch_output=""
 
 launch_instance() {
@@ -570,14 +577,23 @@ launch_instance() {
   return "$status"
 }
 
+if [[ "$default_privileged_verify" == "true" ]]; then
+  echo "Using security.privileged=true by default under podman because nested unprivileged idmaps are not reliably available" >&2
+fi
+
 for image in images:alpine/3.20 images:alpine/3.19 images:alpine/edge; do
-  if launch_instance "$image"; then
+  if [[ "$default_privileged_verify" == "true" ]]; then
+    if launch_instance "$image" -c security.privileged=true; then
+      printf "%s\n" "$launch_output"
+      exit 0
+    fi
+  elif launch_instance "$image"; then
     printf "%s\n" "$launch_output"
     exit 0
   fi
 
   printf "%s\n" "$launch_output" >&2
-  if [[ "$launch_output" == *idmap* ]]; then
+  if [[ "$default_privileged_verify" != "true" && "$launch_output" == *idmap* ]]; then
     echo "Retrying with security.privileged=true because nested idmap delegation is unavailable" >&2
     capsule incus delete -f "$name" >/dev/null 2>&1 || true
     if launch_instance "$image" -c security.privileged=true; then
